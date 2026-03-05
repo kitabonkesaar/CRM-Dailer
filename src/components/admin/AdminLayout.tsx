@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Users, BarChart3, Phone, Settings, LogOut, Download, Search, Edit, Trash2, UserPlus, Save, X, Activity, Calendar } from 'lucide-react';
+import { Users, BarChart3, Phone, Settings, LogOut, Download, Search, Edit, Trash2, UserPlus, Save, X, Activity, Calendar, CheckSquare, Square, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts';
+import { toast } from 'sonner';
 
 interface AdminLayoutProps {
   onLogout: () => void;
@@ -14,12 +15,25 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
   const [leads, setLeads] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [topAgents, setTopAgents] = useState<any[]>([]);
+  const [callsOverTime, setCallsOverTime] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [editingLead, setEditingLead] = useState<any>(null);
   const [editingAgent, setEditingAgent] = useState<any>(null);
   const [showAddAgent, setShowAddAgent] = useState(false);
   const [newAgent, setNewAgent] = useState({ name: '', email: '', role: 'Agent' });
   const [searchTerm, setSearchTerm] = useState('');
   const [agentSearchTerm, setAgentSearchTerm] = useState('');
+  
+  // Date Filter
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  // Bulk Actions
+  const [selectedLeads, setSelectedLeads] = useState<number[]>([]);
+  const [bulkAgentId, setBulkAgentId] = useState('');
+
+  // Settings
+  const [adminProfile, setAdminProfile] = useState({ name: 'Admin User', email: 'admin@example.com' });
 
   useEffect(() => {
     fetchStats();
@@ -27,10 +41,16 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
     fetchLeads();
     fetchLeaderboard();
     fetchTopAgents();
-  }, []);
+    fetchCallsOverTime();
+    fetchAuditLogs();
+  }, [startDate, endDate]);
 
   const fetchStats = async () => {
-    const res = await fetch('/api/admin/stats');
+    let url = '/api/admin/stats';
+    if (startDate && endDate) {
+      url += `?startDate=${startDate}&endDate=${endDate}`;
+    }
+    const res = await fetch(url);
     setStats(await res.json());
   };
 
@@ -40,8 +60,9 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
   };
 
   const fetchLeads = async () => {
-    const res = await fetch('/api/leads');
-    setLeads(await res.json());
+    const res = await fetch('/api/leads?limit=1000'); // Fetch all for admin
+    const data = await res.json();
+    setLeads(data.data || []);
   };
 
   const fetchLeaderboard = async () => {
@@ -50,8 +71,22 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
   };
 
   const fetchTopAgents = async () => {
-    const res = await fetch('/api/admin/top-agents');
+    let url = '/api/admin/top-agents';
+    if (startDate && endDate) {
+      url += `?startDate=${startDate}&endDate=${endDate}`;
+    }
+    const res = await fetch(url);
     setTopAgents(await res.json());
+  };
+
+  const fetchCallsOverTime = async () => {
+    const res = await fetch('/api/admin/calls-over-time');
+    setCallsOverTime(await res.json());
+  };
+
+  const fetchAuditLogs = async () => {
+    const res = await fetch('/api/admin/audit-logs');
+    setAuditLogs(await res.json());
   };
 
   const handleExportCSV = () => {
@@ -63,6 +98,8 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
     if (confirm('Are you sure you want to delete this lead?')) {
       await fetch(`/api/leads/${id}`, { method: 'DELETE' });
       fetchLeads();
+      fetchAuditLogs();
+      toast.success('Lead deleted');
     }
   };
 
@@ -77,6 +114,8 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
     });
     setEditingLead(null);
     fetchLeads();
+    fetchAuditLogs();
+    toast.success('Lead updated');
   };
 
   const handleAddAgent = async (e: React.FormEvent) => {
@@ -91,6 +130,8 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
         setShowAddAgent(false);
         setNewAgent({ name: '', email: '', role: 'Agent' });
         fetchAgents();
+        fetchAuditLogs();
+        toast.success('Agent added');
       }
     } catch (error) {
       console.error('Error adding agent:', error);
@@ -108,12 +149,54 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
     });
     setEditingAgent(null);
     fetchAgents();
+    fetchAuditLogs();
+    toast.success('Agent updated');
   };
 
   const handleDeleteAgent = async (id: number) => {
     if (confirm('Are you sure you want to delete this agent?')) {
       await fetch(`/api/admin/agents/${id}`, { method: 'DELETE' });
       fetchAgents();
+      fetchAuditLogs();
+      toast.success('Agent deleted');
+    }
+  };
+
+  const toggleSelectLead = (id: number) => {
+    if (selectedLeads.includes(id)) {
+      setSelectedLeads(selectedLeads.filter(l => l !== id));
+    } else {
+      setSelectedLeads([...selectedLeads, id]);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedLeads.length === filteredLeads.length) {
+      setSelectedLeads([]);
+    } else {
+      setSelectedLeads(filteredLeads.map(l => l.id));
+    }
+  };
+
+  const handleBulkAssign = async () => {
+    if (!bulkAgentId || selectedLeads.length === 0) return;
+    
+    try {
+      await Promise.all(selectedLeads.map(id => 
+        fetch(`/api/leads/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assigned_agent_id: parseInt(bulkAgentId) })
+        })
+      ));
+      fetchLeads();
+      fetchAuditLogs();
+      setSelectedLeads([]);
+      setBulkAgentId('');
+      toast.success(`Assigned ${selectedLeads.length} leads`);
+    } catch (error) {
+      console.error('Bulk assign error:', error);
+      toast.error('Failed to assign leads');
     }
   };
 
@@ -142,6 +225,7 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
             { id: 'leads', label: 'Lead Manager', icon: Users },
             { id: 'agents', label: 'Agents', icon: Phone },
             { id: 'analytics', label: 'Analytics', icon: Activity },
+            { id: 'audit', label: 'Audit Logs', icon: FileText },
             { id: 'settings', label: 'Settings', icon: Settings },
           ].map((item) => (
             <button
@@ -174,7 +258,23 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
       <main className="flex-1 overflow-y-auto p-8">
         {activeTab === 'dashboard' && stats && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <h2 className="text-3xl font-bold mb-8">Overview</h2>
+            <div className="flex justify-between items-center mb-8">
+              <h2 className="text-3xl font-bold">Overview</h2>
+              <div className="flex gap-4">
+                <input 
+                  type="date" 
+                  className="bg-[#2d2f31] border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#d0bcff]"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                />
+                <input 
+                  type="date" 
+                  className="bg-[#2d2f31] border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#d0bcff]"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                />
+              </div>
+            </div>
             
             <div className="grid grid-cols-4 gap-6 mb-8">
               <div className="bg-[#2d2f31] p-6 rounded-2xl border border-white/5">
@@ -195,27 +295,23 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-2 gap-6 mb-8">
               <div className="bg-[#2d2f31] p-6 rounded-2xl border border-white/5">
-                <h3 className="text-xl font-bold mb-4">Top Performers</h3>
-                <div className="space-y-4">
-                  {leaderboard.slice(0, 3).map((agent, index) => (
-                    <div key={agent.id} className="flex items-center justify-between p-3 bg-white/5 rounded-xl">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-[#d0bcff] text-[#381e72] flex items-center justify-center font-bold text-sm">
-                          {index + 1}
-                        </div>
-                        <div>
-                          <p className="font-medium">{agent.name}</p>
-                          <p className="text-xs text-gray-400">{agent.total_calls} Calls</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-green-400">{agent.conversions}</p>
-                        <p className="text-xs text-gray-500">Sales</p>
-                      </div>
-                    </div>
-                  ))}
+                <h3 className="text-xl font-bold mb-4">Calls Over Time</h3>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={callsOverTime}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                      <XAxis dataKey="date" stroke="#9ca3af" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#9ca3af" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#1a1c1e', borderColor: '#ffffff20', borderRadius: '8px', color: '#fff' }}
+                        itemStyle={{ color: '#d0bcff' }}
+                        cursor={{ stroke: '#ffffff20' }}
+                      />
+                      <Line type="monotone" dataKey="count" stroke="#d0bcff" strokeWidth={3} dot={{ fill: '#d0bcff', r: 4 }} activeDot={{ r: 6 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
 
@@ -260,6 +356,29 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
                 </div>
               </div>
             </div>
+
+            <div className="bg-[#2d2f31] p-6 rounded-2xl border border-white/5">
+              <h3 className="text-xl font-bold mb-4">Top Performers</h3>
+              <div className="space-y-4">
+                {leaderboard.slice(0, 3).map((agent, index) => (
+                  <div key={agent.id} className="flex items-center justify-between p-3 bg-white/5 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-[#d0bcff] text-[#381e72] flex items-center justify-center font-bold text-sm">
+                        {index + 1}
+                      </div>
+                      <div>
+                        <p className="font-medium">{agent.name}</p>
+                        <p className="text-xs text-gray-400">{agent.total_calls} Calls</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-green-400">{agent.conversions}</p>
+                      <p className="text-xs text-gray-500">Sales</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </motion.div>
         )}
 
@@ -279,10 +398,48 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
               </div>
             </div>
 
+            {/* Bulk Actions Bar */}
+            <AnimatePresence>
+              {selectedLeads.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="bg-[#d0bcff] text-[#381e72] p-4 rounded-xl mb-6 flex justify-between items-center shadow-lg"
+                >
+                  <span className="font-bold">{selectedLeads.length} leads selected</span>
+                  <div className="flex gap-4">
+                    <select 
+                      className="bg-white/20 border-none rounded-lg px-3 py-2 text-[#381e72] font-medium focus:outline-none cursor-pointer"
+                      value={bulkAgentId}
+                      onChange={e => setBulkAgentId(e.target.value)}
+                    >
+                      <option value="">Assign to Agent...</option>
+                      {agents.map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={handleBulkAssign}
+                      disabled={!bulkAgentId}
+                      className="bg-[#381e72] text-white px-4 py-2 rounded-lg font-bold hover:bg-[#4f378b] disabled:opacity-50 transition-colors"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div className="bg-[#2d2f31] rounded-2xl border border-white/5 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-black/20 text-gray-400 text-sm uppercase tracking-wider">
                   <tr>
+                    <th className="p-4 w-10">
+                      <button onClick={toggleSelectAll} className="text-gray-400 hover:text-white">
+                        {selectedLeads.length === filteredLeads.length && filteredLeads.length > 0 ? <CheckSquare size={20} /> : <Square size={20} />}
+                      </button>
+                    </th>
                     <th className="p-4">Name</th>
                     <th className="p-4">Phone</th>
                     <th className="p-4">Score</th>
@@ -293,7 +450,12 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {filteredLeads.map(lead => (
-                    <tr key={lead.id} className="hover:bg-white/5 transition-colors">
+                    <tr key={lead.id} className={`hover:bg-white/5 transition-colors ${selectedLeads.includes(lead.id) ? 'bg-white/5' : ''}`}>
+                      <td className="p-4">
+                        <button onClick={() => toggleSelectLead(lead.id)} className={`text-gray-400 hover:text-white ${selectedLeads.includes(lead.id) ? 'text-[#d0bcff]' : ''}`}>
+                          {selectedLeads.includes(lead.id) ? <CheckSquare size={20} /> : <Square size={20} />}
+                        </button>
+                      </td>
                       <td className="p-4 font-medium">{lead.name}</td>
                       <td className="p-4 text-gray-400">{lead.phone}</td>
                       <td className="p-4">
@@ -425,6 +587,80 @@ export default function AdminLayout({ onLogout }: AdminLayoutProps) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'audit' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <h2 className="text-3xl font-bold mb-8">Audit Logs</h2>
+            
+            <div className="bg-[#2d2f31] rounded-2xl border border-white/5 overflow-hidden">
+              <table className="w-full text-left">
+                <thead className="bg-black/20 text-gray-400 text-sm uppercase tracking-wider">
+                  <tr>
+                    <th className="p-4">Time</th>
+                    <th className="p-4">Action</th>
+                    <th className="p-4">Entity</th>
+                    <th className="p-4">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {auditLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-white/5 transition-colors">
+                      <td className="p-4 text-gray-400 text-sm">{new Date(log.created_at).toLocaleString()}</td>
+                      <td className="p-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                          log.action === 'DELETE' ? 'bg-red-500/20 text-red-300' :
+                          log.action === 'CREATE' ? 'bg-green-500/20 text-green-300' :
+                          log.action === 'UPDATE' ? 'bg-blue-500/20 text-blue-300' :
+                          'bg-gray-500/20 text-gray-300'
+                        }`}>
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="p-4 text-sm font-mono">{log.entity_type} #{log.entity_id}</td>
+                      <td className="p-4 text-sm text-gray-300">{log.details}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'settings' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <h2 className="text-3xl font-bold mb-8">Settings</h2>
+            
+            <div className="bg-[#2d2f31] p-8 rounded-2xl border border-white/5 max-w-2xl">
+              <h3 className="text-xl font-bold mb-6">Admin Profile</h3>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Name</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-[#1a1c1e] border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-[#d0bcff]"
+                    value={adminProfile.name}
+                    onChange={e => setAdminProfile({...adminProfile, name: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Email</label>
+                  <input 
+                    type="email" 
+                    className="w-full bg-[#1a1c1e] border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-[#d0bcff]"
+                    value={adminProfile.email}
+                    onChange={e => setAdminProfile({...adminProfile, email: e.target.value})}
+                  />
+                </div>
+                <button 
+                  onClick={() => toast.success('Profile updated')}
+                  className="bg-[#d0bcff] text-[#381e72] font-bold px-6 py-3 rounded-xl hover:bg-[#e8def8] transition-colors"
+                >
+                  Save Changes
+                </button>
               </div>
             </div>
           </motion.div>

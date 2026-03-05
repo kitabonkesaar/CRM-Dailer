@@ -1,15 +1,24 @@
 import React from 'react';
-import { Phone, Users, Calendar, BarChart3 } from 'lucide-react';
+import { Phone, Users, Calendar, BarChart3, UserCircle } from 'lucide-react';
 
 import { motion, AnimatePresence } from 'motion/react';
+
+interface Agent {
+  id: number;
+  name: string;
+  role: string;
+}
 
 interface LayoutProps {
   children: React.ReactNode;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  agents?: Agent[];
+  currentUser?: Agent | null;
+  setCurrentUser?: (agent: Agent) => void;
 }
 
-export default function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
+export default function Layout({ children, activeTab, setActiveTab, agents = [], currentUser, setCurrentUser }: LayoutProps) {
   const tabs = [
     { id: 'dialer', label: 'Dialer', icon: Phone },
     { id: 'leads', label: 'Leads', icon: Users },
@@ -19,6 +28,35 @@ export default function Layout({ children, activeTab, setActiveTab }: LayoutProp
 
   return (
     <div className="flex flex-col h-[100dvh] bg-[#1a1c1e] w-full max-w-md mx-auto border-x border-white/5 overflow-hidden relative text-[#e2e2e6] shadow-2xl">
+      {/* Header with User Selector */}
+      <header className="px-4 py-3 border-b border-white/5 flex justify-between items-center bg-[#1a1c1e]/80 backdrop-blur-md z-10">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#d0bcff] to-[#381e72] flex items-center justify-center text-[#381e72] font-bold text-xs">
+            {currentUser?.name?.charAt(0) || 'A'}
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs text-gray-400">Logged in as</span>
+            <select 
+              className="bg-transparent text-sm font-bold text-white focus:outline-none cursor-pointer"
+              value={currentUser?.id || ''}
+              onChange={(e) => {
+                const agent = agents.find(a => a.id === Number(e.target.value));
+                if (agent && setCurrentUser) setCurrentUser(agent);
+              }}
+            >
+              {agents.map(agent => (
+                <option key={agent.id} value={agent.id} className="bg-[#2d2f31] text-white">
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="text-xs font-mono text-[#d0bcff]/50 border border-[#d0bcff]/20 px-2 py-1 rounded">
+          v1.2.0
+        </div>
+      </header>
+
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto pb-32 scroll-smooth no-scrollbar">
         <AnimatePresence mode="wait">

@@ -1,17 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Save, X, MessageCircle } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Save, Calendar, DollarSign, XCircle, MessageCircle, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface PostCallSummaryProps {
   number: string;
   duration: number;
   onComplete: () => void;
+  currentUser?: { id: number; name: string } | null;
 }
 
-export default function PostCallSummary({ number, duration, onComplete }: PostCallSummaryProps) {
+export default function PostCallSummary({ number, duration, onComplete, currentUser }: PostCallSummaryProps) {
   const [outcome, setOutcome] = useState('Interested');
   const [notes, setNotes] = useState('');
   const [lead, setLead] = useState<{ id: number; name: string; trip_interested?: string } | null>(null);
+  
+  // Disposition Fields
+  const [followupDate, setFollowupDate] = useState('');
+  const [bookingValue, setBookingValue] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
 
   useEffect(() => {
     fetch(`/api/leads/${number}`)
@@ -23,6 +29,7 @@ export default function PostCallSummary({ number, duration, onComplete }: PostCa
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      // 1. Log the call
       await fetch('/api/calls', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -34,8 +41,36 @@ export default function PostCallSummary({ number, duration, onComplete }: PostCa
           outcome,
           notes,
           tags: 'Manual',
+          agent_id: currentUser?.id || 1,
         }),
       });
+
+      // 2. Handle Disposition Logic
+      if (outcome === 'Interested' && followupDate && lead?.id) {
+        await fetch('/api/followups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lead_id: lead.id,
+            scheduled_at: new Date(followupDate).toISOString(),
+            notes: `Follow-up set after call. Notes: ${notes}`,
+            agent_id: currentUser?.id
+          }),
+        });
+      } else if (outcome === 'Booked' && lead?.id) {
+        await fetch(`/api/leads/${lead.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'Booked' })
+        });
+      } else if (outcome === 'Not Interested' && lead?.id) {
+        await fetch(`/api/leads/${lead.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'Lost', notes: `Reason: ${rejectionReason}` })
+        });
+      }
+
       onComplete();
     } catch (error) {
       console.error('Error logging call:', error);
@@ -95,19 +130,15 @@ export default function PostCallSummary({ number, duration, onComplete }: PostCa
           <div>
             <label className="block text-sm text-gray-400 mb-2">Outcome</label>
             <div className="grid grid-cols-2 gap-3">
-              {['Interested', 'Not Interested', 'No Answer', 'Busy', 'Follow-up', 'Booked', 'Not a Lead'].map((o) => (
+              {['Interested', 'Not Interested', 'No Answer', 'Busy', 'Follow-up', 'Booked'].map((o) => (
                 <button
                   key={o}
                   type="button"
                   onClick={() => setOutcome(o)}
                   className={`py-3 px-4 rounded-xl text-sm font-medium transition-all ${
                     outcome === o
-                      ? o === 'Not a Lead'
-                        ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                        : 'bg-[#d0bcff] text-[#381e72] shadow-lg'
-                      : o === 'Not a Lead'
-                        ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20'
-                        : 'bg-[#2d2f31] text-gray-300 hover:bg-[#3d3f41]'
+                      ? 'bg-[#d0bcff] text-[#381e72] shadow-lg'
+                      : 'bg-[#2d2f31] text-gray-300 hover:bg-[#3d3f41]'
                   }`}
                 >
                   {o}
@@ -115,6 +146,59 @@ export default function PostCallSummary({ number, duration, onComplete }: PostCa
               ))}
             </div>
           </div>
+
+          {/* Conditional Fields based on Outcome */}
+          <AnimatePresence>
+            {(outcome === 'Interested' || outcome === 'Follow-up') && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <label className="block text-sm text-gray-400 mb-1">Next Follow-up</label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+                  <input
+                    type="datetime-local"
+                    required
+                    className="w-full bg-[#2d2f31] border border-white/10 rounded-lg pl-10 pr-3 py-3 text-white focus:outline-none focus:border-[#d0bcff]"
+                    value={followupDate}
+                    onChange={e => setFollowupDate(e.target.value)}
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {outcome === 'Booked' && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <label className="block text-sm text-gray-400 mb-1">Booking Value</label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+                  <input
+                    type="number"
+                    placeholder="0.00"
+                    className="w-full bg-[#2d2f31] border border-white/10 rounded-lg pl-10 pr-3 py-3 text-white focus:outline-none focus:border-[#d0bcff]"
+                    value={bookingValue}
+                    onChange={e => setBookingValue(e.target.value)}
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {outcome === 'Not Interested' && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <label className="block text-sm text-gray-400 mb-1">Reason</label>
+                <select
+                  className="w-full bg-[#2d2f31] border border-white/10 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-[#d0bcff]"
+                  value={rejectionReason}
+                  onChange={e => setRejectionReason(e.target.value)}
+                >
+                  <option value="">Select Reason</option>
+                  <option value="Too Expensive">Too Expensive</option>
+                  <option value="Not Interested in Destination">Not Interested in Destination</option>
+                  <option value="Already Booked">Already Booked</option>
+                  <option value="Bad Timing">Bad Timing</option>
+                  <option value="Other">Other</option>
+                </select>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div>
             <label className="block text-sm text-gray-400 mb-2">Notes</label>

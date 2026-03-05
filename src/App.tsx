@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import Dialer from './components/Dialer';
 import Leads from './components/Leads';
@@ -18,11 +18,32 @@ import { Shield } from 'lucide-react';
 
 import { Toaster } from 'sonner';
 
+interface Agent {
+  id: number;
+  name: string;
+  role: string;
+}
+
 export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [activeTab, setActiveTab] = useState('dialer');
   const [activeCall, setActiveCall] = useState<{ number: string } | null>(null);
   const [postCall, setPostCall] = useState<{ number: string; duration: number } | null>(null);
+  
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [currentUser, setCurrentUser] = useState<Agent | null>(null);
+
+  useEffect(() => {
+    fetch('/api/admin/agents')
+      .then(res => res.json())
+      .then(data => {
+        setAgents(data);
+        if (data.length > 0 && !currentUser) {
+          setCurrentUser(data[0]);
+        }
+      })
+      .catch(err => console.error('Failed to fetch agents:', err));
+  }, []);
 
   const handleStartCall = (number: string) => {
     setActiveCall({ number });
@@ -46,9 +67,15 @@ export default function App() {
   return (
     <>
       <Toaster position="top-right" theme="dark" />
-      <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
+      <Layout 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab}
+        agents={agents}
+        currentUser={currentUser}
+        setCurrentUser={setCurrentUser}
+      >
         {activeTab === 'dialer' && <Dialer onCall={handleStartCall} />}
-        {activeTab === 'leads' && <Leads onCall={handleStartCall} />}
+        {activeTab === 'leads' && <Leads onCall={handleStartCall} currentUser={currentUser} />}
         {activeTab === 'analytics' && <Analytics />}
         {activeTab === 'followups' && <Followups onCall={handleStartCall} />}
 
@@ -67,7 +94,8 @@ export default function App() {
             <PostCallSummary 
               number={postCall.number} 
               duration={postCall.duration} 
-              onComplete={handlePostCallComplete} 
+              onComplete={handlePostCallComplete}
+              currentUser={currentUser}
             />
           )}
         </AnimatePresence>
